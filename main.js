@@ -356,6 +356,141 @@ class LayerEdgeConnection {
       return false;
     }
   }
+
+    async completeTask() {
+        try {
+            const timestamp = Date.now();
+            const message = `I am claiming my light node run task node points for ${this.wallet.address} at ${timestamp}`;
+            const sign = await this.wallet.signMessage(message);
+            const dataSign = { sign, timestamp, walletAddress: this.wallet.address };
+            const config = {
+                data: dataSign,
+                headers: { 'Content-Type': 'application/json' }
+            };
+
+            const response = await this.makeRequest(
+                "post",
+                "https://referralapi.layeredge.io/api/task/node-points",
+                config
+            );
+
+            if (response && response.data) {
+                if (response.data.statusCode && response.data.statusCode === 405) {
+                    const cooldownMatch = response.data.message.match(/after\s+([^!]+)!/);
+                    const cooldownTime = cooldownMatch ? cooldownMatch[1].trim() : "unknown time";
+                    logger.info("⚠️ Task Already Completed", `Come back after ${cooldownTime}`);
+                    return true;
+                } else {
+                    logger.info("✅ Task Completion Successful", response.data);
+                    return true;
+                }
+            } else {
+                logger.error("❌ Task Completion Failed");
+                return false;
+            }
+        } catch (error) {
+            logger.error("Error during task completion:", error);
+            return false;
+        }
+    }
+
+    async submitProof() {
+        try {
+            const timestamp = new Date().toISOString();
+            const message = `I am submitting a proof for LayerEdge at ${timestamp}`;
+            const sign = await this.wallet.signMessage(message);
+
+            // Predefined proof messages
+            const proofMessages = [
+                "halo, saya menjalankan layeredge sudah lama sekali, semoga program anda selalu majuuu. terima kasih",
+                "saya sangat menikmati menggunakan layeredge, semoga terus berkembang dan sukses selalu!",
+                "terima kasih atas layanan layeredge yang luar biasa, semoga semakin maju dan sukses!",
+                "layeredge adalah platform yang hebat, saya sangat merekomendasikannya!",
+                "saya telah menggunakan layeredge selama beberapa bulan dan sangat puas!",
+                "terima kasih layeredge, semoga terus sukses dan berkembang!",
+                "saya sangat senang dengan layanan layeredge, semoga semakin maju!",
+                "layeredge adalah yang terbaik, saya sangat menyukainya!",
+                "terima kasih atas layanan yang luar biasa, layeredge!",
+                "saya sangat menikmati menggunakan layeredge, semoga terus berkembang!"
+            ];
+
+            // Randomly select a proof message
+            const randomProofMessage = proofMessages[Math.floor(Math.random() * proofMessages.length)];
+
+            // First request to submit proof
+            const proofData = { 
+                address: this.wallet.address,
+                message: message,
+                proof: randomProofMessage,
+                signature: sign
+            };
+            const proofConfig = {
+                data: proofData,
+                headers: { 'Content-Type': 'application/json' }
+            };
+
+            logger.debug("Proof Submission Payload", proofData);
+
+            const proofResponse = await this.makeRequest(
+                "post",
+                "https://dashboard.layeredge.io/api/send-proof",
+                proofConfig
+            );
+
+            if (proofResponse && proofResponse.data) {
+                logger.info("✅ Proof Submission to Dashboard Successful", {
+                    response: proofResponse.data,
+                    proof: randomProofMessage
+                });
+            } else {
+                logger.error("❌ Proof Submission to Dashboard Failed", {
+                    proof: randomProofMessage
+                });
+                return false;
+            }
+
+            // Second request to claim proof submission points
+            const claimTimestamp = Date.now();
+            const claimMessage = `I am claiming my proof submission node points for ${this.wallet.address} at ${claimTimestamp}`;
+            const claimSign = await this.wallet.signMessage(claimMessage);
+            const claimData = { 
+                sign: claimSign, 
+                timestamp: claimTimestamp, 
+                walletAddress: this.wallet.address 
+            };
+            const claimConfig = {
+                data: claimData,
+                headers: { 'Content-Type': 'application/json' }
+            };
+
+            logger.debug("Claim Proof Points Payload", claimData);
+
+            const claimResponse = await this.makeRequest(
+              "post",
+              "https://referralapi.layeredge.io/api/task/proof-submission",
+              claimConfig
+            );
+
+            if (claimResponse && claimResponse.data) {
+                if (claimResponse.data.statusCode && claimResponse.data.statusCode === 405) {
+                    const cooldownMatch = claimResponse.data.message.match(/after\s+([^!]+)!/);
+                    const cooldownTime = cooldownMatch ? cooldownMatch[1].trim() : "unknown time";
+                    logger.info("⚠️ Proof Submission Already Completed", `Come back after ${cooldownTime}`);
+                    return true;
+                } else {
+                    logger.info("✅ Proof Submission Successful", claimResponse.data);
+                    return true;
+                }
+            } else {
+                logger.error("❌ Proof Submission Failed");
+                return false;
+            }
+        } catch (error) {
+            logger.error("Error during proof submission:", error);
+            return false;
+        }
+    }
+
     async checkNodeStatus() {
         const response = await this.makeRequest(
             "get",
@@ -433,6 +568,12 @@ async function run() {
                     logger.progress(address, 'Wallet Processing Started', 'start');
                     logger.info(`Wallet Details`, `Address: ${address}, Proxy: ${proxy || 'No Proxy'}`);
 
+                    logger.progress(address, 'Completing Task', 'processing');
+                    await socket.completeTask();
+
+                    logger.progress(address, 'Submitting Proof', 'processing');
+                    await socket.submitProof();
+
                     logger.progress(address, 'Performing Daily Check-in', 'processing');
                     await socket.dailyCheckIn();
 
@@ -458,8 +599,8 @@ async function run() {
                 }
             }
             
-            logger.warn('Cycle Complete', 'Waiting 1 hour before next run...');
-            await delay(60 * 60);
+            logger.warn('Cycle Complete', 'Waiting 1 hours before next run...');
+            await delay(1 * 60 * 60); // Wait 24 hours before the next cycle
         }
     } catch (error) {
         logger.error('Fatal error occurred', '', error);
